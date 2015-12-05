@@ -10,14 +10,15 @@ except ImportError: pass
 __dir__ = os.path.dirname(__file__)
 
 
-class EMail(object):
-  """Parses and encapsulates a received email."""
+class Mail(object):
+  """Parses and encapsulates a received mail."""
   def __init__(self, data):
-    """Initializes the email instance"""
+    """Initializes the mail instance from raw data."""
     raise NotImplementedError()
 
+
 class AnonBox(object):
-  """Provides an interface for accessing the anonbox one-time email service."""
+  """Provides an interface for accessing the anonbox one-time E-mail service."""
 
   def __init__(self, server="anonbox.net", https=True):
     """Creates a new inbox on the passed anonbox server."""
@@ -42,7 +43,7 @@ class AnonBox(object):
       r"<dd><p>([0-9a-z]{10})@([0-9a-z]{5})\."
       + re.escape(self.server), content
     )
-    if not m: raise IOError("Could not match email address in reponse")
+    if not m: raise IOError("Could not match mail address in reponse")
     self.publickey = m.groups()[0]
     self.datehash = m.groups()[1]
     self.address = "{}@{}.{}".format(self.publickey, self.datehash, self.server)
@@ -54,11 +55,11 @@ class AnonBox(object):
     )
     if not m: raise IOError("Could not match access URL in reponse")
     if m.groups()[0] != self.datehash:
-      raise IOError("Date hash of the access URL does not match the email address")
+      raise IOError("Date hash of the access URL does not match the mail address")
     self.privatekey = m.groups()[1]
 
   def check(self):
-    """Checks for new emails in the box. Returns a list of all new emails."""
+    """Checks for new mails in the box. Returns a list of all new mails."""
     if not self.valid:
       return []
 
@@ -71,7 +72,7 @@ class AnonBox(object):
     if not "\nFrom " in content:
       return []
     maildata = content.split("\nFrom ")
-    newmails = [EMail(data) for data in maildata[len(self.mails):]]
+    newmails = [Mail(data) for data in maildata[len(self.mails):]]
     self.mails += newmails
     return newmails
 
