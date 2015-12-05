@@ -1,6 +1,6 @@
 import os.path
 import urllib.request, urllib.error
-import argparse
+import re
 import email
 
 ssl = None
@@ -10,7 +10,7 @@ except ImportError: pass
 __dir__ = os.path.dirname(__file__)
 
 
-class Inbox(object):
+class Mailbox(object):
   """
   Provides an interface for accessing the anonbox one-time E-mail service.
 
@@ -26,19 +26,19 @@ class Inbox(object):
     The host name of the anonbox service used.
 
   mails : list of email.message.Message
-    Mails received since the creation of the inbox.
+    Mails received since the creation of the mailbox.
   valid : bool
-    Whether the inbox is still available on the service and can receive mails.
+    Whether the mailbox is still available on the service and can receive mails.
   """
 
   def __init__(self, datehash, privatekey, publickey, host="anonbox.net",
     usessl=True, opener=None):
     """
-    Initializes the instance from the keys of an existing inbox on the anonbox
+    Initializes the instance from the keys of an existing mailbox on the anonbox
     server.
 
-    If you want to create a new inbox, use :Inbox.create:`~anonbox.Inbox.create`
-    instead.
+    If you want to create a new mailbox, use
+    :Mailbox.create:`~anonbox.Mailbox.create` instead.
 
     Parameters
     ----------
@@ -63,7 +63,7 @@ class Inbox(object):
     self.host = host
 
     self.mails = []
-    self.valid = False
+    self.valid = True
     self.protocol = "https" if usessl else "http"
 
     if opener:
@@ -81,7 +81,7 @@ class Inbox(object):
   @classmethod
   def create(cls, host="anonbox.net", usessl=True, opener=None):
     """
-    Creates a new inbox on the anonbox server.
+    Creates a new mailbox on the anonbox server.
 
     Parameters
     ----------
@@ -96,11 +96,11 @@ class Inbox(object):
 
     Returns
     -------
-    anonbox.Inbox
-      An instance that can access the new inbox.
+    anonbox.Mailbox
+      An instance that can access the new mailbox.
     """
     # Create the instance first so we have the right opener
-    self = cls("", "", "", host=host, https=https, opener=None)
+    self = cls("", "", "", host=host, usessl=usessl, opener=None)
     with self.opener.open("{}://{}/en".format(self.protocol, self.host)) as res:
       content = res.read().decode(res.info().get_content_charset() or "utf-8")
 
@@ -124,26 +124,29 @@ class Inbox(object):
     # Set more keys
     self.privatekey = m.groups()[1]
 
+    self.valid = True
+    return self
+
   def check(self):
     """
     Checks for new mails in the box. Returns a list of all new mails.
 
-    In case the service returns a 404, the :Inbox:`anonbox.Inbox` instance is
+    In case the service returns a 404, the :Mailbox:`anonbox.Mailbox` instance is
     set to be invalid.
-    If the instance isn't :valid:`anonbox.Inbox.valid` anymore, calling this
+    If the instance isn't :valid:`anonbox.Mailbox.valid` anymore, calling this
     method will do nothing besides returning an empty list.
 
     Returns
     -------
     list of email.message.Message
       Mails received since the last successful call to
-      :check:`anonbox.Inbox.check`.
+      :check:`anonbox.Mailbox.check`.
     """
     if not self.valid:
       return []
 
     try:
-      with self.opener.open("{}://{}/{}/{}/".format(
+      with self.opener.open("{}://{}/{}/{}".format(
         self.protocol, self.host, self.datehash, self.publickey)) as res:
         if res.getcode() == 404:
           self.valid = False
@@ -164,9 +167,166 @@ class Inbox(object):
     self.mails += newmails
     return newmails
 
+  @property
+  def address(self):
+    """
+    The address of the mailbox.
+    Formatted like `publickey@datehash.host`.
+
+    Returns
+    -------
+    str
+      The address of the mailbox.
+    """
+    return "{}@{}.{}".format(self.publickey, self.datehash, self.host)
+
+  @property
+  def accessurl(self):
+    """
+    The plain-text access URL of the mailbox.
+    Formatted like `protocol://host/datehash/privatekey`.
+
+    Returns
+    -------
+    str
+      The plain-text access URL of the mailbox.
+    """
+    return "{}://{}/{}/{}".format(self.protocol, self.host, self.datehash, self.privatekey)
+
+
 if __name__ == "__main__":
+  import argparse
+  import time
+  import webbrowser
+  import base64
+
   parser = argparse.ArgumentParser(
-    description="A tiny utility to access the anonbox.net one-time email service from the command line.",
-    epilog="Source available at <https://github.com/nucular/anonboxpy>"
+    description="A tiny Python utility and module to access the anonbox.net one-time email service.",
+    epilog="<https://github.com/nucular/anonboxpy>"
   )
-  parser.parse_args()
+  subparsers = parser.add_subparsers(help="The action to perform")
+  # Shown headers
+  headers = ["From", "To", "Date", "Subject"]
+
+  def findPayload(mail, type):
+    if mail.is_multipart():
+      for k in mail.walk():
+        contenttype = k.get_content_type()
+        if contenttype == type:
+          return k.get_payload(decode=True).decode(mail.get_charset() or "utf-8"), contenttype
+      for k in mail.walk():
+        contenttype = k.get_content_type()
+        if k.get_content_type() == mail.get_default_type():
+          return k.get_payload(decode=True).decode(mail.get_charset() or "utf-8"), contenttype
+    return mail.get_payload(decode=True).decode(mail.get_charset() or "utf-8"), mail.get_content_type()
+
+  # anonbox create
+
+  def create(args):
+    print("Creating new mailbox...")
+    mailbox = Mailbox.create(host=args.host, usessl=not args.nossl)
+    print("Address", mailbox.address)
+    print("Access URL", mailbox.accessurl)
+    print("--mailbox {},{},{}\n".format(mailbox.datehash, mailbox.privatekey, mailbox.publickey))
+    return mailbox
+  parser_create = subparsers.add_parser("create",
+    help="create a mailbox and show the access keys"
+  )
+  parser_create.set_defaults(func=create)
+
+  # anonbox check
+
+  def check(args):
+    if not args.mailbox:
+      args.mailbox = create(args)
+    print("Checking for mails...")
+    newmails = args.mailbox.check()
+    if not args.mailbox.valid:
+      print("Mailbox was deleted")
+      return
+    print("{} new mails".format(len(newmails)))
+    for i, v in enumerate(newmails):
+      print("====== {} ======".format(i))
+      for h in headers:
+        print("{}: {}".format(h, v.get(h)))
+      print("---------------")
+      payload, contenttype = findPayload(v, "text/plain")
+      print(payload)
+
+      if args.browse:
+        raise NotImplementedError()
+        payload, contenttype = findPayload(v, "text/html")
+        if contenttype == "text/html":
+          payload = "<p><h1>{}</h1><ul>{}</ul></p>{}".format(
+            i,
+            "".join(["<li>{}: {}</li>".format(h, v.get(h)) for h in headers]),
+            payload
+          )
+        else:
+          payload = "====== {} ======\n{}\n----------------\n".format(
+            i,
+            ["{}: {}\n".format(h, v.get(h)) for h in headers],
+            payload
+          )
+        datauri = "data:" + contenttype + ";base64," + base64.b64encode(payload.encode("utf-8")).decode("utf-8")
+        webbrowser.get().open(datauri, autoraise=True)
+
+  parser_check = subparsers.add_parser("check",
+    help="check a mailbox for new mails"
+  )
+  parser_check.set_defaults(func=check)
+
+  # anonbox watch
+
+  def watch(args):
+    if not args.mailbox:
+      args.mailbox = create(args)
+    try:
+      while True:
+        time.sleep(args.delay)
+        check(args)
+        if not args.mailbox.valid:
+          break
+    except KeyboardInterrupt:
+      pass
+  parser_watch = subparsers.add_parser("watch")
+  parser_watch.set_defaults(func=watch)
+
+  def add_argument(parsers, *args, **kwargs):
+    for parser in parsers:
+      parser.add_argument(*args, **kwargs)
+
+
+  add_argument([parser_create, parser_check, parser_watch],
+    "--host",
+    help="the host name of the anonbox service used, defaults to anonbox.net",
+    type=str, action="store", default="anonbox.net"
+  )
+  add_argument([parser_create, parser_check, parser_watch],
+    "--nossl",
+    help="don't use SSL when accessing the service",
+    action="store_true", default=False
+  )
+  add_argument([parser_check, parser_watch],
+    "--mailbox",
+    help="use an existing mailbox instead of creating a new one",
+    type=lambda a: Mailbox(*(a.split(","))), action="store", default=None,
+    metavar=("DATEHASH,PRIVATE,PUBLIC")
+  )
+  add_argument([parser_check, parser_watch],
+    "--browse", "-b",
+    help="open received messages in the browser (HTML emails may compromise your anonymity)",
+    action="store_true", default=False
+  )
+  add_argument([parser_watch],
+    "--delay", "-d",
+    help="delay between checks in seconds, defaults to 30",
+    type=int, action="store", default=30
+  )
+
+
+  args = parser.parse_args()
+  if "func" in args:
+    args.func(args)
+  else:
+    parser.error("a subcommand is required")
