@@ -93,6 +93,11 @@ class Inbox(object):
     opener : urllib.request.OpenerDirector
       A custom opener that will be used to do all requests. Allows you to
       configure a proxy, for example. Overrides the `usessl` parameter.
+
+    Returns
+    -------
+    anonbox.Inbox
+      An instance that can access the new inbox.
     """
     # Create the instance first so we have the right opener
     self = cls("", "", "", host=host, https=https, opener=None)
