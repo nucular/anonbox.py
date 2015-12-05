@@ -1,20 +1,13 @@
 import os.path
-import urllib.request
+import urllib.request, urllib.error
 import re
-import quopri
+import email
 
 ssl = None
 try: import ssl
 except ImportError: pass
 
 __dir__ = os.path.dirname(__file__)
-
-
-class Mail(object):
-  """Parses and encapsulates a received mail."""
-  def __init__(self, data):
-    """Initializes the mail instance from raw data."""
-    raise NotImplementedError()
 
 
 class AnonBox(object):
@@ -63,16 +56,23 @@ class AnonBox(object):
     if not self.valid:
       return []
 
-    with self.opener.open("{}://{}/{}/{}/".format(self.protocol, self.server, self.datehash, self.publickey)) as res:
-      if res.getcode() == 404:
-        self.valid = False
-        return []
-      content = res.read().decode(res.info().get_content_charset() or "utf-8")
-
-    if not "\nFrom " in content:
+    try:
+      with self.opener.open("{}://{}/{}/{}/".format(self.protocol, self.server, self.datehash, self.publickey)) as res:
+        if res.getcode() == 404:
+          self.valid = False
+          return []
+        content = res.read().decode(res.info().get_content_charset() or "utf-8")
+    except urllib.error.HTTPError as e:
+      self.valid = False
       return []
-    maildata = content.split("\nFrom ")
-    newmails = [Mail(data) for data in maildata[len(self.mails):]]
+
+    if not "From " in content:
+      return []
+    mails = content.split("\nFrom ")
+    newmails = [
+      email.message_from_string(data.split("\n", 1))
+      for data in mails[len(self.mails):]
+    ]
     self.mails += newmails
     return newmails
 
