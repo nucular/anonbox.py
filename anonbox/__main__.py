@@ -170,7 +170,7 @@ def main(args=None):
   add_argument([parser_check, parser_watch],
     "--mailbox",
     help="use an existing mailbox instead of creating a new one",
-    type=lambda a: Mailbox(*(a.split(","))), action="store", default=None,
+    type=lambda a: anonbox.Mailbox(*(a.split(","))), action="store", default=None,
     metavar=("DATEHASH,PRIVATE,PUBLIC")
   )
   add_argument([parser_check, parser_watch],
